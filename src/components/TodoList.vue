@@ -28,7 +28,7 @@
                 <input
                     type="checkbox"
                     :checked="task.completed"
-                    @change="toggleTask(task.id)"
+                    @change="toggleTask(task.id, task.completed)"
                     class="w-4 h-4"
                 >
                 </input>
@@ -49,7 +49,13 @@
 </template>
 
 <script setup lang="ts">
-    import { ref } from 'vue'
+    import { ref, watch } from 'vue'
+    import { db } from '@/firebase'
+    import { useUserStore } from '@/stores/user'
+    import {
+        collection, addDoc, deleteDoc, updateDoc,
+        doc, query, onSnapshot
+    } from 'firebase/firestore'
 
     interface Task {
         id: string
@@ -57,28 +63,48 @@
         completed: boolean
     }
 
+    const userStore = useUserStore()
     const newTask = ref('')
     const tasks = ref<Task[]>([])
 
-    function addTask() {
-        if (newTask.value.trim()) {
-            tasks.value.push({
-                id: Date.now().toString(),
-                text: newTask.value.trim(),
-                completed: false
+    watch(
+        () => userStore.user,
+        (user) => {
+            if (!user) return
+
+            const q = query(collection(db, 'users', user.uid, 'tasks'))
+
+            onSnapshot(q, (snapshot) => {
+                tasks.value = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                })) as Task[]
             })
-            newTask.value= ''
-        }
+        },
+        { immediate: true }
+    )
+
+    async function addTask() {
+        if (!newTask.value.trim() || !userStore.user) return
+
+        await addDoc(collection(db, 'users', userStore.user.uid, 'tasks'), {
+            text: newTask.value.trim(),
+            completed: false
+        })
+        newTask.value = ''
     }
 
-    function toggleTask(id: string) {
-        const task = tasks.value.find(t => t.id === id)
-        if (task) {
-            task.completed = !task.completed
-        }
+    async function toggleTask(id: string, currentStatus: boolean) {
+        if (!userStore.user) return
+
+        await updateDoc(doc(db, 'users', userStore.user.uid, 'tasks', id), {
+            completed: !currentStatus
+        })
     }
 
-    function deleteTask(id: string) {
-        tasks.value = tasks.value.filter(t => t.id !== id)
+    async function deleteTask(id: string) {
+        if (!userStore.user) return
+
+        await deleteDoc(doc(db, 'users', userStore.user.uid, 'tasks', id))
     }
 </script>
